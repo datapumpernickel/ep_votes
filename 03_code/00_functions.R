@@ -4,7 +4,11 @@
 
 get_dataset_meps <- function(url){
   mep_data <- request(url) |> 
-    req_perform() |> 
+    req_perform() |>   
+    req_headers(
+                                   name = "Paul Bochtler", 
+                                   purpose = "scientific research", 
+                                   website = "swp-berlin.org") |> 
     resp_body_json(simplifyVector = T)
   
   
@@ -114,5 +118,156 @@ get_partei_api <- function(path){
 
 
 
+# 02_collect_rcv ----------------------------------------------------------
 
+
+get_votes <- function(url, dir, id) {
+  if (!file.exists(glue('{dir}/{id}.xml'))) {
+    res <- request(url) |>
+      req_headers(name = "Paul Bochtler", 
+                  purpose = "scientific research", 
+                  website = "swp-berlin.org") |> 
+      req_throttle(30 / 60) |>
+      req_retry(max_tries = 20) |>
+      req_perform() |>
+      resp_body_string() |>
+      write_lines(glue('{dir}/{id}.xml'))
+  }
+}
+
+
+parse_votes <- function(path) {
+  xml_data <- read_xml(path)
+  
+  global <- tibble(
+    sitting_id = xml2::xml_find_first(xml_data, "@Sitting.Identifier") |> xml2::xml_text(),
+    sitting_date = xml2::xml_find_first(xml_data, "@Sitting.Date") |> xml2::xml_text(),
+    ep_ref = xml2::xml_find_first(xml_data, "@EP.Reference") |> xml2::xml_text(),
+    ep_num = xml2::xml_find_first(xml_data, "@EP.Number") |> xml2::xml_text(),
+  )
+  
+  result <- xml_data |> xml2::xml_find_all("//RollCallVote.Result") 
+  
+  
+  identifier <- result |>
+    map_chr( ~ xml2::xml_find_first(.x, "@Identifier") |>
+               xml2::xml_text())
+  
+  date <- result |>
+    map_chr( ~ xml2::xml_find_first(.x, "@Date") |>
+               xml2::xml_text())
+  
+  title <- result |>
+    map_chr( ~ xml2::xml_find_first(.x, "RollCallVote.Description.Text") |>
+               xml2::xml_text())  
+  
+  description_text <- xml_data |> xml2::xml_find_all("//RollCallVote.Description.Text")
+  
+  table_id <- description_text |>
+    map( ~.x |> xml_contents() |> map(~.x |> xml2::xml_text())) |> 
+    map_vec( ~ifelse(is.null(.x), NA_character_, .x))
+  
+  reds_desc <- description_text |> map(~xml_contents(.x) |> xml2::xml_attr("href"))
+  
+  
+  results <- result |>
+    map( ~ {
+      yes <- xml2::xml_find_all(.x, "Result.For") |>
+        map_dfr( ~ {
+          
+          pol_group_list <- xml2::xml_find_all(.x, "Result.PoliticalGroup.List") 
+          political_groups <-pol_group_list |>
+            xml2::xml_find_first("@Identifier") |>
+            xml2::xml_text()
+          meps <- pol_group_list |>
+            map2(.x = _, .y = political_groups,
+                 ~ {
+                   group_member_name <-  xml2::xml_find_all(.x, ".//Member.Name | .//PoliticalGroup.Member.Name")
+                   name <- group_member_name|>
+                     xml2::xml_text()
+                   id <-
+                     group_member_name |>
+                     xml2::xml_find_first("@MepId")  |>
+                     xml2::xml_text()
+                   pers_id <-
+                     group_member_name |>
+                     xml2::xml_find_first("@PersId")  |>
+                     xml2::xml_text()
+                   
+                   data <-
+                     tibble(name, id, pers_id) |> mutate(political_group = .y) |>
+                     mutate(position = "y")
+                 })
+          return(meps)
+        })
+      abstention <- xml2::xml_find_all(.x, "Result.Abstention") |>
+        map_dfr( ~ {
+          
+          pol_group_list <- xml2::xml_find_all(.x, "Result.PoliticalGroup.List") 
+          political_groups <-pol_group_list |>
+            xml2::xml_find_first("@Identifier") |>
+            xml2::xml_text()
+          meps <- pol_group_list |>
+            map2(.x = _, .y = political_groups,
+                 ~ {
+                   group_member_name <-  xml2::xml_find_all(.x, ".//Member.Name | .//PoliticalGroup.Member.Name")
+                   name <- group_member_name|>
+                     xml2::xml_text()
+                   id <-
+                     group_member_name |>
+                     xml2::xml_find_first("@MepId")  |>
+                     xml2::xml_text()
+                   pers_id <-
+                     group_member_name |>
+                     xml2::xml_find_first("@PersId")  |>
+                     xml2::xml_text()
+                   
+                   data <-
+                     tibble(name, id, pers_id) |> mutate(political_group = .y) |>
+                     mutate(position = "a")
+                 })
+          return(meps)
+        })
+      against <- xml2::xml_find_all(.x, "Result.Against") |>
+        map_dfr( ~ {
+          
+          pol_group_list <- xml2::xml_find_all(.x, "Result.PoliticalGroup.List") 
+          political_groups <-pol_group_list |>
+            xml2::xml_find_first("@Identifier") |>
+            xml2::xml_text()
+          meps <- pol_group_list |>
+            map2(.x = _, .y = political_groups,
+                 ~ {
+                   group_member_name <-  xml2::xml_find_all(.x, ".//Member.Name | .//PoliticalGroup.Member.Name")
+                   name <- group_member_name|>
+                     xml2::xml_text()
+                   id <-
+                     group_member_name |>
+                     xml2::xml_find_first("@MepId")  |>
+                     xml2::xml_text()
+                   pers_id <-
+                     group_member_name |>
+                     xml2::xml_find_first("@PersId")  |>
+                     xml2::xml_text()
+                   
+                   data <-
+                     tibble(name, id, pers_id) |> mutate(political_group = .y) |>
+                     mutate(position = "n")
+                 })
+          return(meps)
+        })
+      
+      votes <- bind_rows(yes, against, abstention)
+      
+    })
+  
+  
+  full <- tibble(identifier, title, date,tabled_text = table_id, results) |>
+    unnest(results) |>
+    bind_cols(global) |>
+    mutate(path = path) |>
+    mutate(across(everything(),as.character))
+  
+  return(full)
+}
 

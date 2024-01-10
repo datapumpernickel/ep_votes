@@ -98,3 +98,5 @@ partei_names <- mep_data |>
 mep_data <- mep_data |> 
   left_join(partei_names) |> 
   mutate(across(where(is.POSIXct), ~as.Date(.x) |> as.character()))
+
+DBI::dbWriteTable(con, "meps_partei_table", mep_data, overwrite = T)
