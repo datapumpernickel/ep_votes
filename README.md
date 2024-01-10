@@ -1,11 +1,13 @@
-## Collect Roll Call Votes of the European Parliament
+# Collect Roll Call Votes of the European Parliament
 
-### Steps needed
+## Steps needed
+1. Collect a nice table with all Members of the European Parliament 👩
+2. Collect and parse the Roll Call Sheets of the EP 🗳️
+3. Collect additional meta data on each vote 🗃️
 
 
-#### 1. Collect a nice table with all Members of the European Parliament
+### 1. Collect a nice table with all Members of the European Parliament 👩
 
---> See file: [01_collect_mep_data](https://github.com/datapumpernickel/ep_votes/blob/main/03_code/01_collect_mep_data.R) for this
 
 There is several ways to get this info, among them: 
 * scrape the webpage of the european parliament, but this does not give us reliable info on past terms
@@ -29,6 +31,12 @@ Hence I use a two-step process, that makes use of different aspects of the above
 
 This results in a list of ~6000 member of parliament - party membership rows. 
 
-#### 2. Collect and parse the Roll Call Sheets of the EP
+--> See file: [01_collect_mep_data](https://github.com/datapumpernickel/ep_votes/blob/main/03_code/01_collect_mep_data.R) 
+
+### 2. Collect and parse the Roll Call Sheets of the EP 🗳️
 
 tbd
+
+### 3. Collect additional meta data on each vote 🗃️
+
+tbc
