@@ -76,7 +76,12 @@ mep_data <- mep_data_complete |>
   ## parse membership info from EU rdf sheets
   mutate(extra_info = future_map(membership_id, extract_membership_info, .progress = T)) |> 
   unnest(extra_info) |> 
-  unnest(extra_info)
+  unnest(extra_info) |> 
+  select(-partei_name) |> 
+  mutate(pers_id = str_remove_all(pers_id, ".*/")) |> 
+  mutate(nationality = str_remove_all(nationality, ".*/"))|> 
+  mutate(full_name = str_c(first_name, " ", last_name)) |> 
+  mutate(end_date = if_else(is.na(end_date), Sys.Date(), end_date+1))
 
 get_partei_api <- memoise::memoise(get_partei_api, cache = cd)
 
@@ -85,8 +90,11 @@ partei_names <- mep_data |>
   distinct(organization) |>
   filter(!is.na(organization)) |>
   mutate(partei_name = future_map_dfr(organization, get_partei_api))|>
-  unnest(partei_name)
+  unnest(partei_name) |> 
+  rename(short_party = short_label,
+         long_party = long_label)
 
 ## merge party names
 mep_data <- mep_data |> 
-  left_join(partei_names) 
+  left_join(partei_names) |> 
+  mutate(across(where(is.POSIXct), ~as.Date(.x) |> as.character()))
