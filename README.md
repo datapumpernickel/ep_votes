@@ -5,7 +5,8 @@
 
 #### 1. Collect a nice table with all Members of the European Parliament
 
---> See 01_collect_mep_data for this
+--> See file: [01_collect_mep_data](https://github.com/datapumpernickel/ep_votes/blob/main/03_code/01_collect_mep_data.R) for this
+
 There is several ways to get this info, among them: 
 * scrape the webpage of the european parliament, but this does not give us reliable info on past terms
 * get the .rdf files from the Open Data Portal: https://data.europarl.europa.eu/en/datasets/members-of-the-european-parliament-meps-parliamentary-term9/38
