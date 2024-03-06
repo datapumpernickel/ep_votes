@@ -42,61 +42,52 @@ source("03_code/00_functions.R")
 
 ## connect to sqlite database
 con <- DBI::dbConnect(RSQLite::SQLite(),"04_clean_data/ep_votes_data.sqlite")
-cd <- cachem::cache_disk(dir = "01_raw_data/mep_membership_info", max_size = 1024*1024^2*10)
+cd_api <- cachem::cache_disk(dir = "01_raw_data/mep_membership_api", max_size = 1024*1024^2*10)
 
-
-## get MEP data 
-base_url <- "https://data.europarl.europa.eu/OdpDatasetService/Datasets/members-of-the-european-parliament-meps-parliamentary-term"
-
-dir.create("01_raw_data/mep")
-
-datasets_mep <- map_dfr(str_c(base_url,5:9), get_dataset_meps)
-
-plan("multisession", workers = 10)
-
-files <- list.files("01_raw_data/mep",full.names = T)
-
-parse_mep_file <- memoise::memoise(parse_mep_file,cache = cd)
-
-mep_data_complete <- future_map(files, parse_mep_file, .progress = T)
-
-extract_membership_info <- memoise::memoise(extract_membership_info,cache = cd)
-
-extract_membership_info <- safely(extract_membership_info,otherwise = tibble(error = "http_error"))
+# get mep list ------------------------------------------------------------
+get_mep_list <- memoise(get_mep_list,cache  = cd_api)
+meps <- map_dfr(1:9,get_mep_list) |> 
+  distinct()
 
 plan("multisession", workers = 32)
+get_mep <- memoise(get_mep,cache  = cd_api)
+get_org <- memoise(get_org,cache  = cd_api)
 
-mep_data <- mep_data_complete |> 
-  map_dfr(as_tibble) |> 
-  ## unnest nested info on parties
-  unnest(memberships,keep_empty = T) |>
-  ## filter to memberships that are with link to national parties
-  filter(stringi::stri_detect_fixed(classification,"/NP"))|> 
-  distinct(pers_id, nationality, first_name, last_name, membership_id, organization)|> 
-  ## parse membership info from EU rdf sheets
-  mutate(extra_info = future_map(membership_id, extract_membership_info, .progress = T)) |> 
-  unnest(extra_info) |> 
-  unnest(extra_info) |> 
-  select(-partei_name) |> 
-  mutate(pers_id = str_remove_all(pers_id, ".*/")) |> 
-  mutate(nationality = str_remove_all(nationality, ".*/"))|> 
-  mutate(full_name = str_c(first_name, " ", last_name)) |> 
-  mutate(end_date = if_else(is.na(end_date), Sys.Date(), end_date+1))
+meps_info <- future_map(unique(meps$identifier),get_mep,.progress = T) |> 
+  future_map_dfr(~select(.x,-any_of(c("hasEmail","homepage"))) |> 
+                   unnest(any_of("placeOfBirth")))
 
-get_partei_api <- memoise::memoise(get_partei_api, cache = cd)
+meps_ep_membership <- meps_info  |>
+  mutate(nationality = str_remove_all(citizenship,".*country/")) |> 
+  mutate(gender = str_remove_all(hasGender,".*human-sex/") |> tolower()) |> 
+  filter(stringi::stri_detect_fixed(hasMembership_organization,"ep-")) |> 
+  filter(str_detect(hasMembership_role,"/MEMBER$")) |> 
+  mutate(start_date = ymd_hms(hasMembership_memberDuring_startDate)) |> 
+  mutate(end_date = ymd_hms(hasMembership_memberDuring_endDate)) |> 
+  select(identifier, type, label, start_date, end_date,nationality,gender,contains(c("Name"))) |> distinct() |> 
+  mutate(end_date = if_else(is.na(end_date), Sys.Date(), end_date |> as_date()),
+         start_date = as_date(start_date))
 
-## get party names from the EU 
-partei_names <- mep_data |> 
-  distinct(organization) |>
-  filter(!is.na(organization)) |>
-  mutate(partei_name = future_map_dfr(organization, get_partei_api))|>
-  unnest(partei_name) |> 
-  rename(short_party = short_label,
-         long_party = long_label)
+meps_party_membership <- meps_info |> 
+  filter(stringi::stri_detect_fixed(hasMembership_membershipClassification,"NP")) |> 
+  select(identifier, type, label, contains(c("endDate","startDate")),hasMembership_organization) |> 
+  mutate(start_date = ymd_hms(hasMembership_memberDuring_startDate)) |> 
+  mutate(end_date = ymd_hms(hasMembership_memberDuring_endDate)) |> 
+  select(identifier, type, label, start_date, end_date,hasMembership_organization) |> 
+  distinct() |> 
+  mutate(end_date = if_else(is.na(end_date), Sys.Date(), end_date |> as_date()),
+         start_date = as_date(start_date)) |> 
+  mutate(identifier_party = str_remove_all(hasMembership_organization, "org/"))
 
-## merge party names
-mep_data <- mep_data |> 
-  left_join(partei_names) |> 
-  mutate(across(where(is.POSIXct), ~as.Date(.x) |> as.character()))
+party_names <- meps_party_membership |> 
+  distinct(identifier_party) |> 
+  pull(1) |> 
+  future_map_dfr(get_org,.progress = T)
 
-DBI::dbWriteTable(con, "meps_partei_table", mep_data, overwrite = T)
+meps_party_membership <- meps_party_membership |> 
+  left_join(party_names |> select(short_party, long_party, identifier_party)) |> 
+  select(-hasMembership_organization)
+
+DBI::dbWriteTable(con, "meps_ep_membership", meps_ep_membership, overwrite = T)
+
+DBI::dbWriteTable(con, "meps_party_membership", meps_party_membership, overwrite = T)

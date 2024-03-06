@@ -117,6 +117,40 @@ future::plan("multisession", workers = 32)
 full_data <-
   future_map_dfr(files, parse_votes, .progress = T)
 
-dbWriteTable(con, "co_voting_table", full_data)
+write_rds(full_data, "04_clean_data/covoting_table.rds")
 
 
+full_data <- read_rds("04_clean_data/covoting_table.rds")
+
+
+sum(is.na(full_data$pers_id))
+
+length(unique(full_data$name))
+
+distinct_names_per_vote <- full_data |> 
+  select(identifier, name) |> 
+  count(identifier, name)
+
+missing_identifiers <- full_data |> 
+  filter(is.na(identifier)) |> 
+  count(path, sitting_id, sitting_date, ep_ref, tabled_text, date, name, title)
+
+
+library(data.table)
+
+# Assuming full_data is your data frame
+setDT(full_data)  # Convert your data frame to a data.table
+
+# Perform the count operation grouped by 'identifier' and 'name'
+distinct_names_per_vote <- full_data[, .N, by = .(identifier, name)]
+
+
+meps_partei <- tbl(con, "meps_partei_table") |> collect()
+
+## upload data to zenodo
+## clean code to query zenodo 
+## get a unique identifier for each individual vote
+## get meps with missing pers_id 
+## exclude meps that are double in votes by name only (and have missing pers_ids)
+## merge meps with missing pers_ids to my data of meps to find their pers_ids
+## merge votes and meps 

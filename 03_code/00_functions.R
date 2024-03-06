@@ -1,15 +1,44 @@
 
 # 01_collect_mep_data -----------------------------------------------------
 
+get_mep_list <- function(term){
+  url <- "https://data.europarl.europa.eu/api/v1/meps?parliamentary-term={term}&format=application%2Fld%2Bjson&offset=0"
+  resp <- request(glue::glue(url)) |> 
+    req_perform() |> 
+    resp_body_json() |> 
+    pluck("data") |> 
+    map_dfr(as_tibble)
+}
 
-get_dataset_meps <- function(url){
-  mep_data <- request(url) |> 
-    req_perform() |>   
-    req_headers(
-                                   name = "Paul Bochtler", 
-                                   purpose = "scientific research", 
-                                   website = "swp-berlin.org") |> 
-    resp_body_json(simplifyVector = T)
+get_mep <- function(id){
+  url <- "https://data.europarl.europa.eu/api/v1/meps/{id}?format=application%2Fld%2Bjson&json-layout=framed"
+  resp <- httr2::request(glue::glue(url)) |> 
+    httr2::req_perform() |> 
+    httr2::resp_body_json(simplifyVector = T) |> 
+    purrr::pluck("data")  |> 
+    tidyr::unnest(hasMembership, names_sep ="_") |> 
+    tidyr::unnest(hasMembership_memberDuring, names_sep ="_")
+}
+
+get_org <- function(id){
+  url <- "https://data.europarl.europa.eu/api/v1/corporate-bodies/{id}?format=application%2Fld%2Bjson&json-layout=framed&language=en"
+  resp <- httr2::request(glue::glue(url)) |> 
+    httr2::req_perform() |> 
+    httr2::resp_body_json(simplifyVector = T) |> 
+    purrr::pluck("data")  |> 
+    tidyr::unnest(altLabel, names_sep ="_") |> 
+    tidyr::unnest(prefLabel, names_sep ="_") |> 
+    dplyr::select(hasMembership_organization = id, identifier_party = identifier, short_party = label , long_party =  prefLabel_en)
+  return(resp)
+}
+
+get_dataset_meps <- function(url) {
+  mep_data <- httr2::request(url) |>
+    httr2::req_headers(name = "Paul Bochtler",
+                       purpose = "scientific research",
+                       website = "swp-berlin.org") |>
+    httr2::req_perform() |>
+    httr2::resp_body_json(simplifyVector = T)
   
   
   datasets <- mep_data   |>

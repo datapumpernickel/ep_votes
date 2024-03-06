@@ -2,7 +2,11 @@ archive/*
 venv/*
 
 01_raw_data/*.rds
+01_raw_data/*
+
 04_clean_data/ep_votes_data.sqlite
+04_clean_data/*.rdf
+04_clean_data/*
 
 02_documentation/Dokumentation.xlsx
 
