@@ -1,6 +1,9 @@
 archive/*
 venv/*
 
+01_raw_data/*.rds
+04_clean_data/ep_votes_data.sqlite
+
 02_documentation/Dokumentation.xlsx
 
 *.Rproj
