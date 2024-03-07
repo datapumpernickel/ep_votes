@@ -147,8 +147,46 @@ setDT(full_data)  # Convert your data frame to a data.table
 # Perform the count operation grouped by 'identifier' and 'name'
 distinct_names_per_vote <- full_data[, .N, by = .(identifier, name)]
 
-meps_partei <- tbl(con, "meps_party_membership") |> collect()
-meps_ep <- tbl(con, "meps_ep_membership") |> collect()
+library(data.table)
+setDT(positions)  # Convert your data frame to a data.table
+duplicates <- positions[, .N, by = .(identifier, pers_id)]
+
+test <- duplicates |>
+  dplyr::filter(N>1)
+
+test_2 <- positions |>
+  dplyr::filter(identifier =="125101")
+
+
+
+# write to sqlite ---------------------------------------------------------
+
+positions <- full_data |>
+  dplyr::mutate(sitting_date = lubridate::ymd(sitting_date) ) |>
+  dplyr::filter(sitting_date >= lubridate::ymd("2020-01-01")) 
+
+
+
+
+#### write to ssqlite
+DBI::dbWriteTable(
+  con,
+  "votes_xml",
+  positions |> 
+    distinct(identifier, title, date, sitting_date, sitting_id, ep_ref, ep_num, tabled_text, tabled_text_href),
+  overwrite = T
+)
+
+DBI::dbWriteTable(
+  con,
+  "votes_xml_positions",
+  positions |>
+    distinct(id = identifier, pers_id,name, position),
+  overwrite = T
+)
+
+test <- tbl(con,"votes_xml_positions") |> collect()
+
 
 ## upload data to zenodo
 ## clean code to query zenodo 
