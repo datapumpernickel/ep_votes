@@ -32,122 +32,16 @@ get_org <- function(id){
   return(resp)
 }
 
-get_dataset_meps <- function(url) {
-  mep_data <- httr2::request(url) |>
-    httr2::req_headers(name = "Paul Bochtler",
-                       purpose = "scientific research",
-                       website = "swp-berlin.org") |>
-    httr2::req_perform() |>
-    httr2::resp_body_json(simplifyVector = T)
-  
-  
-  datasets <- mep_data   |>
-    pluck("odpDatasetVersions") |>
-    select(id, odpResources) |>
-    unnest(odpResources, names_repair = "unique") |>
-    select(id...1, odpResourceVersions) |>
-    unnest(odpResourceVersions) |>
-    select(id...1, odpResourceLangs)  |>
-    unnest(odpResourceLangs) |> filter(format == "rdf") |> filter(id == max(id)) |>
-    select(url, publicationDate) |>
-    mutate(
-      cover_to = ifelse(
-        length(mep_data$coverDateTo) == 0,
-        Sys.Date() |> as.character(),
-        as.POSIXct(mep_data$coverDateTo / 1000, origin = "1970-01-01", tz = "UTC") |> as.Date() |> as.character()
-      ),
-      cover_from = as.POSIXct(
-        mep_data$coverDateFrom / 1000,
-        origin = "1970-01-01",
-        tz = "UTC"
-      ) |> as.Date() |> as.character()
-    )
-  if(!file.exists(str_c("01_raw_data/mep/",str_remove(datasets$url,".*tion/")))){
-    request(datasets$url) |> 
-      req_perform() |> 
-      resp_body_string() |> 
-      write_lines(str_c("01_raw_data/mep/",str_remove(datasets$url,".*tion/")))
-  }
-  
-  
-  return(datasets)
-}
-
-
-parse_mep_file <- function(path){
-  xml <- xml2::read_xml(path)
-  
-  namespaces <- xml2::xml_ns(xml)
-  
-  mep_data <- xml2::xml_find_all(xml, "foaf:Person") |>
-    purrr::map_dfr(~{
-      pers_id <- xml2::xml_find_first(.x, "@rdf:about") |> xml2::xml_text()
-      
-      nationality <- xml2::xml_attr(xml2::xml_find_first(.x, ".//euvoc:represents", ns = namespaces), "resource")
-      
-      first_name <- xml2::xml_find_first(.x, ".//foaf:givenName", ns = namespaces) |> xml2::xml_text()
-      last_name <- xml2::xml_find_first(.x, ".//foaf:familyName", ns = namespaces) |> xml2::xml_text()
-      
-      memberships <- xml2::xml_find_all(.x, ".//org:hasMembership/org:Membership", ns = namespaces) |>
-        purrr::map_dfr(~{
-          membership_id <- xml2::xml_attr(.x, "about")
-          classification <- xml2::xml_attr(xml2::xml_find_first(.x, "..//epvoc:membershipClassification", ns = namespaces), "resource")
-          organization <- xml2::xml_attr(xml2::xml_find_first(.x, "..//org:organization", ns = namespaces), "resource")
-          start_date <- xml2::xml_find_first(.x, "..//dcat:startDate") |> xml2::xml_text()
-          end_date <- xml2::xml_find_first(.x, "..//dcat:endDate") |> xml2::xml_text()
-          
-          tibble::tibble(membership_id, classification, organization, start_date, end_date) 
-        })
-      
-      return(tibble::tibble(pers_id, nationality, first_name, last_name, memberships = list(memberships)))
-    }, .progress = TRUE)
-  
-  return(mep_data |> dplyr::mutate(source_path = path))
-}
-
-extract_membership_info <- function(url) {
-  # Read the XML content from the URL
-  xml_content <- xml2::read_xml(url)
-  
-  # Define namespaces, if necessary
-  namespaces <-  xml2::xml_ns(xml_content)
-  
-  # Extract the start and end dates
-  start_date <-  xml2::xml_find_first(xml_content, ".//dcat:startDate") %>%  xml2::xml_text() %>% lubridate::ymd_hms()
-  end_date <-  xml2::xml_find_first(xml_content, ".//dcat:endDate") %>%  xml2::xml_text() %>%  lubridate::ymd_hms()
-  
-  # Extract the English name of the organization
-  org_name_en <- xml2::xml_find_first(xml_content, ".//org:Organization/skos:prefLabel[@xml:lang='en']") %>% xml2::xml_text()
-  # Return a tibble with the extracted information
-  tibble::tibble(
-    start_date = start_date,
-    end_date = end_date,
-    partei_name = org_name_en
-  )
-}
-
-get_partei_api <- function(path){
-  xml <- xml2::read_xml(path)
-  # Extract the short label
-  short_label <- xml %>% 
-    xml2::xml_find_all("//rdfs:label") %>% 
-    xml2::xml_text()
-  
-  long_label <- xml |> 
-    xml2::xml_find_all("//skos:prefLabel[@xml:lang='en']")  %>% 
-    xml2::xml_text()
-  # Create a tibble
-  labels <- tibble::tibble(
-    long_label,
-    short_label
-  )
-  return(labels)
-}
-
-
-
 
 # 02_collect_rcv ----------------------------------------------------------
+
+get_meetings_api <- function(year){
+  httr2::request("https://data.europarl.europa.eu/api/v1/meetings") |> 
+    httr2::req_headers(format = "application/ld+json",
+                       year = year) |> 
+    httr2::req_perform() |> 
+    httr2::resp_body_json(simplifyVector = T)
+}
 
 
 get_votes <- function(url, dir, id) {
@@ -164,6 +58,7 @@ get_votes <- function(url, dir, id) {
   }
 }
 
+path <- "01_raw_data/votes/P9_PV(2022)05-05.xml"
 
 parse_votes <- function(path) {
   xml_data <- read_xml(path)
@@ -196,7 +91,15 @@ parse_votes <- function(path) {
     map( ~.x |> xml_contents() |> map(~.x |> xml2::xml_text())) |> 
     map_vec( ~ifelse(is.null(.x), NA_character_, .x))
   
-  reds_desc <- description_text |> map(~xml_contents(.x) |> xml2::xml_attr("href"))
+  reds_desc <- description_text |> map(~xml_contents(.x) |> 
+                                         xml2::xml_attr("href") |>  
+                                         (\(.x).x[!is.na(.x)])()) |> 
+    purrr::modify_if(
+                                            
+                                           ~ length(.) == 0, 
+                                           ~ NA_character_
+                                         ) |> 
+    map(~str_remove_all(.x,".*/"))
   
   
   results <- result |>
@@ -291,7 +194,15 @@ parse_votes <- function(path) {
     })
   
   
-  full <- tibble(identifier, title, date,tabled_text = table_id, results) |>
+  full <-
+    tibble(
+      identifier,
+      title,
+      date,
+      tabled_text = table_id,
+      tabled_text_href = reds_desc,
+      results
+    ) |>
     unnest(results) |>
     bind_cols(global) |>
     mutate(path = path) |>
@@ -299,4 +210,60 @@ parse_votes <- function(path) {
   
   return(full)
 }
+
+
+# collect rcv from API ----------------------------------------------------
+
+get_meetings_api <- function(year){
+  httr2::request("https://data.europarl.europa.eu/api/v1/meetings") |>
+    httr2::req_headers(accept = "application/ld+json",
+                       year = year) |>
+    httr2::req_perform() |>
+    httr2::resp_body_json(simplifyVector = T) |>
+    purrr::pluck("data")
+}
+
+activity_id <- "MTG-PL-2024-01-15"
+
+get_decisions_api <- function(activity_id){
+  resp <- httr2::request("https://data.europarl.europa.eu/api/v1/meetings") |>
+    httr2::req_url_path_append(activity_id) |>
+    httr2::req_url_path_append("decisions") |>
+    httr2::req_headers(accept = "application/ld+json") |>
+    httr2::req_perform()
+
+  if(httr2::resp_has_body(resp)){
+    result <- resp |> 
+      httr2::resp_body_json(simplifyVector = T) |>
+      purrr::pluck("data") |>
+      tidyr::unnest(activity_label) |>
+      tidyr::unnest(recorded_in_a_realization_of) |>
+      dplyr::select(
+        id,
+        activity_date,
+        activity_id,
+        activity_start_date,
+        contains("voter"),
+        contains("votes"),
+        recorded_in_a_realization_of,
+        decision_method,
+        had_activity_type,
+        activity_label_en = en
+      ) |>
+      tidyr::pivot_longer(cols = contains("voter"), names_to = "vote_type", values_to = "votes") |>
+      tidyr::unnest_longer(votes) |>
+      dplyr::mutate(intended = dplyr::if_else(stringr::str_detect(vote_type, "intend"), "intended", "actual"),
+                    vote_type = stringr::str_remove(vote_type,"had_voter_intended_|had_voter_")) |>
+      tidyr::pivot_wider(names_from = "intended", values_from = "vote_type") |>
+      dplyr::group_by(id, votes) |>
+      dplyr::mutate(n = dplyr::n()) |>
+      dplyr::ungroup() |> 
+      mutate(across(everything(), as.character)) 
+  } else {
+    result <- tibble(activity_id, error = "empty body")
+  }
+  return(result)
+
+}
+
 
