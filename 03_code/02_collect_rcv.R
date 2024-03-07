@@ -41,9 +41,6 @@ p_load(char = packs)
 source("03_code/00_functions.R")
 con <- DBI::dbConnect(RSQLite::SQLite(),"04_clean_data/ep_votes_data.sqlite")
 
-
-
-
 # Get List of Votes from Public Register ----------------------------------
 
 
@@ -94,7 +91,7 @@ dir.create(dir, recursive = T)  # Ensure directory exists
 plan("multisession", workers = 12)
 
 ## Download and Process votes in Parallel
-get_empty <- future_pmap(
+empty_placeholder_for_warnings <- future_pmap(
   list(
     url = votes_links$url,
     dir = dir,
@@ -108,19 +105,25 @@ get_empty <- future_pmap(
 
 # parse RCV files ---------------------------------------------------------
 
-## List Debate File Paths
-files <- list.files(dir, full.names = T)
-
-## Parse Votes in Parallel
-future::plan("multisession", workers = 32)
-
-full_data <-
-  future_map_dfr(files, parse_votes, .progress = T)
-
-write_rds(full_data, "04_clean_data/covoting_table.rds")
-
+if(parse){
+  ## List Debate File Paths
+  files <- list.files(dir, full.names = T)
+  
+  ## Parse Votes in Parallel
+  future::plan("multisession", workers = 32)
+  
+  ## this takes well over an hour
+  full_data <-
+    future_map_dfr(files, parse_votes, .progress = T)
+  
+  write_rds(full_data, "04_clean_data/covoting_table.rds")
+}
 
 full_data <- read_rds("04_clean_data/covoting_table.rds")
+
+
+
+# missing analysis --------------------------------------------------------
 
 
 sum(is.na(full_data$pers_id))
@@ -144,8 +147,8 @@ setDT(full_data)  # Convert your data frame to a data.table
 # Perform the count operation grouped by 'identifier' and 'name'
 distinct_names_per_vote <- full_data[, .N, by = .(identifier, name)]
 
-
-meps_partei <- tbl(con, "meps_partei_table") |> collect()
+meps_partei <- tbl(con, "meps_party_membership") |> collect()
+meps_ep <- tbl(con, "meps_ep_membership") |> collect()
 
 ## upload data to zenodo
 ## clean code to query zenodo 
