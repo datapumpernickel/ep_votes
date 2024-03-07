@@ -216,8 +216,9 @@ parse_votes <- function(path) {
 
 get_meetings_api <- function(year){
   httr2::request("https://data.europarl.europa.eu/api/v1/meetings") |>
-    httr2::req_headers(accept = "application/ld+json",
-                       year = year) |>
+    httr2::req_url_query(year = year) |> 
+    httr2::req_headers(accept = "application/ld+json"
+                       ) |>
     httr2::req_perform() |>
     httr2::resp_body_json(simplifyVector = T) |>
     purrr::pluck("data")
@@ -239,16 +240,17 @@ get_decisions_api <- function(activity_id){
       tidyr::unnest(activity_label) |>
       tidyr::unnest(recorded_in_a_realization_of) |>
       dplyr::select(
+        tidyselect::any_of("en"),
+        tidyselect::any_of("fr"),
         id,
         activity_date,
         activity_id,
         activity_start_date,
-        contains("voter"),
-        contains("votes"),
+        tidyselect::contains("voter"),
+        tidyselect::contains("votes"),
         recorded_in_a_realization_of,
         decision_method,
-        had_activity_type,
-        activity_label_en = en
+        had_activity_type
       ) |>
       tidyr::pivot_longer(cols = contains("voter"), names_to = "vote_type", values_to = "votes") |>
       tidyr::unnest_longer(votes) |>
@@ -258,9 +260,9 @@ get_decisions_api <- function(activity_id){
       dplyr::group_by(id, votes) |>
       dplyr::mutate(n = dplyr::n()) |>
       dplyr::ungroup() |> 
-      mutate(across(everything(), as.character)) 
+      dplyr::mutate(dplyr::across(tidyselect::everything(), as.character)) 
   } else {
-    result <- tibble(activity_id, error = "empty body")
+    result <- dplyr::tibble(activity_id, error = "empty body")
   }
   return(result)
 
